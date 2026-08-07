@@ -22,6 +22,9 @@ provider "azuread" {}
 # Mevcut subscription'ı referans almak için — role assignment scope'unda kullanılır
 data "azurerm_subscription" "current" {}
 
+# Bootstrap'ı çalıştıran kullanıcının kimliği — local terraform init için gerekli
+data "azuread_client_config" "current" {}
+
 # Terraform state'lerin tutulacağı resource group, account ve container
 resource "azurerm_resource_group" "tfstate" {
   name     = "rg-tfstate"
@@ -61,11 +64,21 @@ resource "azuread_application_federated_identity_credential" "github_main" {
   audiences      = ["api://AzureADTokenExchange"]
 }
 
-# Role Assignments — GitHub Actions SP'nin ihtiyaç duyduğu izinler
+# Role Assignments
 #
 # NOT: "Contributor" rolü management plane (kaynak yönetimi) için gereklidir.
 # Storage blob içeriklerine (data plane) erişim için ayrı bir rol gerekir —
 # Contributor bu erişimi sağlamaz.
+
+# Storage Blob Data Contributor — bootstrap'ı çalıştıran kullanıcı (local geliştirici)
+#   use_azuread_auth = true ile local terraform init/apply yaparken kendi hesabınla
+#   (az login) state storage'ına erişebilmek için gerekli.
+resource "azurerm_role_assignment" "deployer_tfstate_blob" {
+  principal_id         = data.azuread_client_config.current.object_id
+  principal_type       = "User"
+  scope                = azurerm_storage_account.tfstate.id
+  role_definition_name = "Storage Blob Data Contributor"
+}
 
 # Storage Blob Data Contributor — tfstate storage account (data plane)
 #   terraform init/apply sırasında state dosyasını (blob) okumak ve yazmak için gerekli.
