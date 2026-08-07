@@ -1,0 +1,20 @@
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Terraform — infra
+infra/terraform.tfvars
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+
+# Terraform — bootstrap
+# terraform.tfvars dosyaları subscription_id ve github_username içerir
+bootstrap/terraform.tfvars
+bootstrap/.terraform/
+bootstrap/*.tfstate
+bootstrap/*.tfstate.backup
