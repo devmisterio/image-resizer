@@ -17,14 +17,13 @@ env:
 jobs:
   # --- Infrastructure ---------------------------------------------------------
   # terraform apply: altyapı değişikliklerini Azure'a uygular.
-  # Çıktılar (function_app_name) sonraki job tarafından kullanılır.
-  # apply güvenlidir: main'e sadece PR üzerinden merge edilir ve
-  # CI'daki terraform plan zaten incelenmiştir.
+  # Çıktılar (function_app_name, resource_group_name) sonraki job tarafından kullanılır.
   infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.tf-output.outputs.function_app_name }}
+      resource_group_name: ${{ steps.tf-output.outputs.resource_group_name }}
     defaults:
       run:
         working-directory: infra
@@ -44,8 +43,6 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
-          # terraform_wrapper=false: wrapper'ın eklediği stdout metadata'sı
-          # "terraform output -raw" komutunu bozar; devre dışı bırakılıyor.
           terraform_wrapper: false
 
       - name: Terraform Init
@@ -59,17 +56,24 @@ jobs:
             -auto-approve \
             -no-color
 
-      # Function App adını bir sonraki job'a iletmek için output'tan okuyoruz.
-      # Hardcode yerine Terraform output'u kullanmak, isim değişikliklerinde
-      # workflow'un otomatik güncellenmesini sağlar.
       - name: Get Terraform Outputs
         id: tf-output
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
 
   # --- Application Deploy -----------------------------------------------------
-  # infra job'u tamamlandıktan sonra çalışır.
-  # Function App altyapısının var olduğu garanti altına alındıktan sonra deploy yapılır.
+  # Azure CLI ile Kudu ZipDeploy kullanılır.
+  #
+  # Neden functions-action değil?
+  #   functions-action, Linux Consumption + Managed Identity kombinasyonunda
+  #   WEBSITE_RUN_FROM_PACKAGE modunu kullanır. Bu modda Function App'in kendi
+  #   Managed Identity'si ile blob'u okuması gerekir. İlk deploy'da RBAC
+  #   propagation ve runtime initialization gecikmesi nedeniyle sync trigger
+  #   güvenilir şekilde çalışmaz.
+  #
+  #   Azure CLI (az functionapp deployment source config-zip) Kudu ZipDeploy
+  #   API'sini doğrudan kullanır ve Contributor rolü ile çalışır.
   deploy:
     name: Deploy Function App
     runs-on: ubuntu-latest
@@ -86,15 +90,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Azure RBAC atamaları anında geçerli olmaz (propagation: 1-10 dakika).
-      # İlk deploy'da terraform apply RBAC rollerini oluşturur, hemen ardından
-      # deploy denenirse Function App'in Managed Identity'si henüz blob'a erişemez.
-      # Bu bekleme süresi propagation tamamlanmasını sağlar.
-      - name: Wait for RBAC Propagation
-        run: |
-          echo "Waiting 60 seconds for Azure RBAC propagation..."
-          sleep 60
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -106,14 +101,16 @@ jobs:
             --configuration Release \
             --output ${{ github.workspace }}/publish
 
-      # Azure/functions-action: Kudu ZipDeploy API'si üzerinden publish klasörünü
-      # Function App'e yükler. azure/login ile kurulan Azure CLI bağlamını kullanır.
-      #
-      # retry-count: RBAC propagation veya runtime başlatma gecikmesine karşı
-      # otomatik yeniden deneme. Her deneme arasında 10 saniye bekler.
+      - name: Create Deployment Package
+        run: |
+          cd ${{ github.workspace }}/publish
+          zip -r ${{ github.workspace }}/deploy.zip .
+
+      # Kudu ZipDeploy API üzerinden deploy.
+      # Contributor rolü yeterli — ek data plane rolü gerekmez.
       - name: Deploy to Azure Functions
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ needs.infra.outputs.function_app_name }}
-          package: ${{ github.workspace }}/publish
-          retry-count: 3
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group ${{ needs.infra.outputs.resource_group_name }} \
+            --name ${{ needs.infra.outputs.function_app_name }} \
+            --src ${{ github.workspace }}/deploy.zip
