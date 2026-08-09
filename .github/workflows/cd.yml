@@ -1,0 +1,105 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+
+jobs:
+  # --- Infrastructure ---------------------------------------------------------
+  # terraform apply: altyapı değişikliklerini Azure'a uygular.
+  # Çıktılar (function_app_name) sonraki job tarafından kullanılır.
+  # apply güvenlidir: main'e sadece PR üzerinden merge edilir ve
+  # CI'daki terraform plan zaten incelenmiştir.
+  infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      function_app_name: ${{ steps.tf-output.outputs.function_app_name }}
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          # terraform_wrapper=false: wrapper'ın eklediği stdout metadata'sı
+          # "terraform output -raw" komutunu bozar; devre dışı bırakılıyor.
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          terraform apply \
+            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -auto-approve \
+            -no-color
+
+      # Function App adını bir sonraki job'a iletmek için output'tan okuyoruz.
+      # Hardcode yerine Terraform output'u kullanmak, isim değişikliklerinde
+      # workflow'un otomatik güncellenmesini sağlar.
+      - name: Get Terraform Outputs
+        id: tf-output
+        run: |
+          echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+
+  # --- Application Deploy -----------------------------------------------------
+  # infra job'u tamamlandıktan sonra çalışır.
+  # Function App altyapısının var olduğu garanti altına alındıktan sonra deploy yapılır.
+  deploy:
+    name: Deploy Function App
+    runs-on: ubuntu-latest
+    needs: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Publish
+        run: |
+          dotnet publish src/ImageResizeFunction/ImageResizeFunction.csproj \
+            --configuration Release \
+            --output ${{ github.workspace }}/publish
+
+      # Azure/functions-action: Kudu ZipDeploy API'si üzerinden publish klasörünü
+      # Function App'e yükler. azure/login ile kurulan Azure CLI bağlamını kullanır.
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ needs.infra.outputs.function_app_name }}
+          package: ${{ github.workspace }}/publish

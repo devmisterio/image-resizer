@@ -55,12 +55,28 @@ resource "azuread_service_principal" "github" {
   client_id = azuread_application.github.client_id
 }
 
-# GitHub Actions'ın şifresiz bağlanmasını sağlayan federated credential
+# GitHub Actions'ın şifresiz bağlanmasını sağlayan federated credential'lar
+#
+# NOT: Her farklı GitHub bağlamı (branch, PR) farklı bir OIDC `sub` claim'i üretir.
+# Tek credential yetmez; her bağlam için ayrı credential gerekir.
+
+# Main branch → CD pipeline (terraform apply + function deploy)
 resource "azuread_application_federated_identity_credential" "github_main" {
   application_id = azuread_application.github.id
   display_name   = "github-actions-main"
   issuer         = "https://token.actions.githubusercontent.com"
   subject        = "repo:${var.github_username}/${var.github_repo}:ref:refs/heads/main"
+  audiences      = ["api://AzureADTokenExchange"]
+}
+
+# Pull Request → CI pipeline (terraform plan + dotnet build)
+#   PR'ların OIDC token'ında sub claim: "repo:org/repo:pull_request"
+#   Bu credential olmadan PR'daki terraform plan AuthenticationError alır.
+resource "azuread_application_federated_identity_credential" "github_pr" {
+  application_id = azuread_application.github.id
+  display_name   = "github-actions-pull-request"
+  issuer         = "https://token.actions.githubusercontent.com"
+  subject        = "repo:${var.github_username}/${var.github_repo}:pull_request"
   audiences      = ["api://AzureADTokenExchange"]
 }
 
