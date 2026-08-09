@@ -65,18 +65,18 @@ resource "azuread_application_federated_identity_credential" "github_main" {
   application_id = azuread_application.github.id
   display_name   = "github-actions-main"
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_username}/${var.github_repo}:ref:refs/heads/main"
+  subject        = "repo:${var.github_username}@${var.github_user_id}/${var.github_repo}@${var.github_repo_id}:ref:refs/heads/main"
   audiences      = ["api://AzureADTokenExchange"]
 }
 
 # Pull Request → CI pipeline (terraform plan + dotnet build)
-#   PR'ların OIDC token'ında sub claim: "repo:org/repo:pull_request"
+#   PR'ların OIDC token'ında sub claim: "repo:owner@id/repo@id:pull_request"
 #   Bu credential olmadan PR'daki terraform plan AuthenticationError alır.
 resource "azuread_application_federated_identity_credential" "github_pr" {
   application_id = azuread_application.github.id
   display_name   = "github-actions-pull-request"
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_username}/${var.github_repo}:pull_request"
+  subject        = "repo:${var.github_username}@${var.github_user_id}/${var.github_repo}@${var.github_repo_id}:pull_request"
   audiences      = ["api://AzureADTokenExchange"]
 }
 
