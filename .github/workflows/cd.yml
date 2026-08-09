@@ -55,6 +55,7 @@ jobs:
         run: |
           terraform apply \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -var="github_app_client_id=${{ secrets.AZURE_CLIENT_ID }}" \
             -auto-approve \
             -no-color
 

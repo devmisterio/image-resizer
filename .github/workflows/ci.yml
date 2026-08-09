@@ -61,10 +61,12 @@ jobs:
 
       # Canlı Azure ortamıyla karşılaştırarak değişiklik planı üretir.
       # subscription_id tfvars'tan gelmiyor (gitignore'da); -var ile geçiliyor.
+      # github_app_client_id: SP lookup data source için gerekli (deployment rol ataması).
       - name: Terraform Plan
         run: |
           terraform plan \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -var="github_app_client_id=${{ secrets.AZURE_CLIENT_ID }}" \
             -no-color
 
   # --- .NET Build -------------------------------------------------------------

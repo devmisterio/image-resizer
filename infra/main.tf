@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
   }
 
   backend "azurerm" {
@@ -18,6 +22,15 @@ terraform {
 provider "azurerm" {
   features {}
   subscription_id = var.subscription_id
+}
+
+provider "azuread" {}
+
+# GitHub Actions Service Principal lookup
+#   client_id (application ID) üzerinden SP'nin object_id'sini bulur.
+#   WEBSITE_RUN_FROM_PACKAGE deployment için gerekli rol atamasında kullanılır.
+data "azuread_service_principal" "github" {
+  client_id = var.github_app_client_id
 }
 
 # Resource Group
@@ -101,10 +114,18 @@ resource "azurerm_linux_function_app" "func" {
   }
 }
 
-# Role Assignments — storage_uses_managed_identity = true için gerekli
-#
-# Functions host runtime, AzureWebJobsStorage olarak verilen storage account'u
-# blob, queue ve table için birlikte kullanır. Tüm üç rol zorunludur.
+# Storage Blob Data Contributor — GitHub Actions SP (deployment)
+#   Azure/functions-action, Linux Consumption + RBAC kombinasyonunda deployment
+#   paketini (zip) WEBSITE_RUN_FROM_PACKAGE modunda blob'a yükler. Bu işlem
+#   GitHub Actions SP kimliğiyle yapılır; SP'nin uygulama storage'a
+#   veri yazabilmesi için bu rol zorunludur.
+resource "azurerm_role_assignment" "github_app_storage_blob" {
+  principal_id         = data.azuread_service_principal.github.object_id
+  principal_type       = "ServicePrincipal"
+  scope                = azurerm_storage_account.sa.id
+  role_definition_name = "Storage Blob Data Contributor"
+}
+
 
 # Blob Data Contributor:
 #   - uploads container'dan blob stream okuma (BlobTrigger binding)
