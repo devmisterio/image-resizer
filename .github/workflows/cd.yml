@@ -86,6 +86,15 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # Azure RBAC atamaları anında geçerli olmaz (propagation: 1-10 dakika).
+      # İlk deploy'da terraform apply RBAC rollerini oluşturur, hemen ardından
+      # deploy denenirse Function App'in Managed Identity'si henüz blob'a erişemez.
+      # Bu bekleme süresi propagation tamamlanmasını sağlar.
+      - name: Wait for RBAC Propagation
+        run: |
+          echo "Waiting 60 seconds for Azure RBAC propagation..."
+          sleep 60
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -99,8 +108,12 @@ jobs:
 
       # Azure/functions-action: Kudu ZipDeploy API'si üzerinden publish klasörünü
       # Function App'e yükler. azure/login ile kurulan Azure CLI bağlamını kullanır.
+      #
+      # retry-count: RBAC propagation veya runtime başlatma gecikmesine karşı
+      # otomatik yeniden deneme. Her deneme arasında 10 saniye bekler.
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ needs.infra.outputs.function_app_name }}
           package: ${{ github.workspace }}/publish
+          retry-count: 3
