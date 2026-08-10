@@ -96,12 +96,43 @@ jobs:
           cd ${{ github.workspace }}/publish
           zip -r ${{ github.workspace }}/deploy.zip .
 
+      - name: Wait for RBAC & Warmup SCM Site
+        run: |
+          echo "Waiting 30 seconds for Azure RBAC role assignments to propagate..."
+          sleep 30
+          echo "Restarting Function App to refresh Managed Identity credentials..."
+          az functionapp restart \
+            --name ${{ needs.infra.outputs.function_app_name }} \
+            --resource-group ${{ needs.infra.outputs.resource_group_name }}
+          echo "Waiting 15 seconds for SCM container to initialize..."
+          sleep 15
+
       - name: Deploy via OneDeploy
         run: |
-          az functionapp deploy \
-            --resource-group ${{ needs.infra.outputs.resource_group_name }} \
-            --name ${{ needs.infra.outputs.function_app_name }} \
-            --src-path ${{ github.workspace }}/deploy.zip \
-            --type zip
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          until [ "$SUCCESS" = "true" ] || [ $RETRY_COUNT -eq $MAX_RETRIES ]; do
+            echo "Attempting deployment (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)..."
+            if az functionapp deploy \
+                --resource-group ${{ needs.infra.outputs.resource_group_name }} \
+                --name ${{ needs.infra.outputs.function_app_name }} \
+                --src-path ${{ github.workspace }}/deploy.zip \
+                --type zip; then
+              SUCCESS=true
+              echo "Deployment succeeded!"
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Deployment failed. Waiting 20 seconds before retrying..."
+                sleep 20
+              else
+                echo "Deployment failed after $MAX_RETRIES attempts."
+                exit 1
+              fi
+            fi
+          done
+
 
 
