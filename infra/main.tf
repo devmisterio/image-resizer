@@ -113,6 +113,10 @@ resource "azurerm_linux_function_app" "func" {
     FUNCTIONS_WORKER_RUNTIME              = "dotnet-isolated"
     AzureWebJobsStorage__accountName      = azurerm_storage_account.sa.name
     AzureWebJobsStorage__credential       = "managedidentity"
+    
+    # Required for Linux Consumption plan (Managed Identity not supported for Azure Files)
+    WEBSITE_CONTENTAZUREFILECONNECTIONSTRING = azurerm_storage_account.sa.primary_connection_string
+    WEBSITE_CONTENTSHARE                     = "func-${var.project}-${var.environment}-content"
   }
 
   # Terraform'a dışarıdan (GitHub Action) eklenen paket URL'sini silmemesini söyler
