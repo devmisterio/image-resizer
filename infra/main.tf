@@ -113,7 +113,6 @@ resource "azurerm_linux_function_app" "func" {
     FUNCTIONS_WORKER_RUNTIME              = "dotnet-isolated"
     AzureWebJobsStorage__accountName      = azurerm_storage_account.sa.name
     AzureWebJobsStorage__credential       = "managedidentity"
-    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = "SystemAssigned"
   }
 }
 

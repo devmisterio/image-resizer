@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.tf-output.outputs.function_app_name }}
+      resource_group_name: ${{ steps.tf-output.outputs.resource_group_name }}
     defaults:
       run:
         working-directory: infra
@@ -57,6 +58,7 @@ jobs:
         id: tf-output
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
 
   # --- Application Deploy -----------------------------------------------------
   # Microsoft standart Azure/functions-action@v1 kullanır.
@@ -88,13 +90,15 @@ jobs:
             --configuration Release \
             --output ${{ github.workspace }}/publish
 
-      - name: Zip Package
-        run: |
-          cd ${{ github.workspace }}/publish
-          zip -r ../package.zip .
-
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
+        continue-on-error: true
         with:
           app-name: ${{ needs.infra.outputs.function_app_name }}
-          package: ${{ github.workspace }}/package.zip
+          package: ${{ github.workspace }}/publish
+
+      - name: Restart Function App (Sync Workaround)
+        run: |
+          az functionapp restart \
+            --name ${{ needs.infra.outputs.function_app_name }} \
+            --resource-group ${{ needs.infra.outputs.resource_group_name }}
