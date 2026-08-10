@@ -103,7 +103,7 @@ resource "azurerm_linux_function_app" "func" {
   
   site_config {
     application_stack {
-      dotnet_version = "10"
+      dotnet_version = "10.0"
       use_dotnet_isolated_runtime = true
     }
   }
