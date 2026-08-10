@@ -114,6 +114,13 @@ resource "azurerm_linux_function_app" "func" {
     AzureWebJobsStorage__accountName      = azurerm_storage_account.sa.name
     AzureWebJobsStorage__credential       = "managedidentity"
   }
+
+  # Terraform'a dışarıdan (GitHub Action) eklenen paket URL'sini silmemesini söyler
+  lifecycle {
+    ignore_changes = [
+      app_settings["WEBSITE_RUN_FROM_PACKAGE"]
+    ]
+  }
 }
 
 # Storage Blob Data Contributor — GitHub Actions SP (deployment)
