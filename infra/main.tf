@@ -110,7 +110,9 @@ resource "azurerm_linux_function_app" "func" {
   
   app_settings = {
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.ai.connection_string
-    AzureWebJobsStorage__accountName = azurerm_storage_account.sa.name
+    FUNCTIONS_WORKER_RUNTIME              = "dotnet-isolated"
+    AzureWebJobsStorage__accountName      = azurerm_storage_account.sa.name
+    AzureWebJobsStorage__credential       = "managedidentity"
   }
 }
 

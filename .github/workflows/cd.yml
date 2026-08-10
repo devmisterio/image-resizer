@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.tf-output.outputs.function_app_name }}
-      resource_group_name: ${{ steps.tf-output.outputs.resource_group_name }}
     defaults:
       run:
         working-directory: infra
@@ -58,12 +57,10 @@ jobs:
         id: tf-output
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
-          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
 
   # --- Application Deploy -----------------------------------------------------
-  # func azure functionapp publish: Azure Functions Core Tools'un deploy komutu.
-  # Linux Consumption dahil tüm plan tiplerinde çalışır.
-  # az login ile kurulan credential'ı otomatik kullanır.
+  # Microsoft standart Azure/functions-action@v1 kullanır.
+  # Azure login (OIDC) ile kimlik doğrulandıktan sonra publish edilen çıktı paketlenip dağıtılır.
   deploy:
     name: Deploy Function App
     runs-on: ubuntu-latest
@@ -85,22 +82,14 @@ jobs:
         with:
           dotnet-version: "10.x"
 
-      # Azure Functions Core Tools v4 — func azure functionapp publish için gerekli
-      - name: Install Azure Functions Core Tools
-        run: npm install -g azure-functions-core-tools@4 --unsafe-perm true
-
       - name: Publish
         run: |
           dotnet publish src/ImageResizeFunction/ImageResizeFunction.csproj \
             --configuration Release \
             --output ${{ github.workspace }}/publish
 
-      # func azure functionapp publish: Core Tools Linux Consumption'da
-      # doğru deployment yöntemini (remote package) otomatik seçer.
-      # --no-build: zaten dotnet publish ile derlendi, tekrar build etme.
       - name: Deploy to Azure Functions
-        run: |
-          cd ${{ github.workspace }}/publish
-          func azure functionapp publish ${{ needs.infra.outputs.function_app_name }} \
-            --dotnet-isolated \
-            --no-build
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ needs.infra.outputs.function_app_name }}
+          package: ${{ github.workspace }}/publish
