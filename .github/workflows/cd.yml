@@ -61,9 +61,6 @@ jobs:
           echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
 
   # --- Application Deploy -----------------------------------------------------
-  # Linux Consumption + RBAC ortamlarında Azure/functions-action paket yükleme ve sync trigger
-  # adımlarında bilinen yetki/zamanlama sorunları çıkardığı için Azure CLI ZipDeploy (az functionapp deployment source config-zip)
-  # yöntemi kullanılmaktadır.
   deploy:
     name: Deploy Function App
     runs-on: ubuntu-latest
@@ -83,7 +80,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.x"
+          dotnet-version: "8.x"
 
       - name: Publish
         run: |
@@ -91,70 +88,8 @@ jobs:
             --configuration Release \
             --output ${{ github.workspace }}/publish
 
-      - name: Package Artifacts
-        run: |
-          cd ${{ github.workspace }}/publish
-          zip -r ${{ github.workspace }}/deploy.zip .
-
-      - name: Wait for SCM Site to be Ready (Smart Polling)
-        run: |
-          SCM_URL="https://${{ needs.infra.outputs.function_app_name }}.scm.azurewebsites.net/api/deployments"
-          echo "Polling SCM site endpoint ($SCM_URL)..."
-          
-          MAX_POLL=20
-          POLL_COUNT=0
-          SCM_UP=false
-
-          until [ "$SCM_UP" = "true" ] || [ $POLL_COUNT -eq $MAX_POLL ]; do
-            POLL_COUNT=$((POLL_COUNT+1))
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 10 \
-              -H "Authorization: Bearer $(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)" \
-              "$SCM_URL" || echo "000")
-            
-            echo "Attempt $POLL_COUNT/$MAX_POLL: SCM HTTP Status = $STATUS"
-            
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-              echo "SCM site is up and responsive (HTTP $STATUS)!"
-              SCM_UP=true
-            else
-              echo "SCM site not ready yet (HTTP $STATUS). Waiting 15 seconds..."
-              sleep 15
-            fi
-          done
-
-          if [ "$SCM_UP" != "true" ]; then
-            echo "SCM site failed to respond after $MAX_POLL attempts."
-            exit 1
-          fi
-
-      - name: Deploy via OneDeploy
-        run: |
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          SUCCESS=false
-
-          until [ "$SUCCESS" = "true" ] || [ $RETRY_COUNT -eq $MAX_RETRIES ]; do
-            echo "Attempting deployment (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)..."
-            if az functionapp deploy \
-                --resource-group ${{ needs.infra.outputs.resource_group_name }} \
-                --name ${{ needs.infra.outputs.function_app_name }} \
-                --src-path ${{ github.workspace }}/deploy.zip \
-                --type zip; then
-              SUCCESS=true
-              echo "Deployment succeeded!"
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Deployment failed. Waiting 20 seconds before retrying..."
-                sleep 20
-              else
-                echo "Deployment failed after $MAX_RETRIES attempts."
-                exit 1
-              fi
-            fi
-          done
-
-
-
-
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ needs.infra.outputs.function_app_name }}
+          package: ${{ github.workspace }}/publish

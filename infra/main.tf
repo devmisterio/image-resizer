@@ -103,7 +103,7 @@ resource "azurerm_linux_function_app" "func" {
   
   site_config {
     application_stack {
-      dotnet_version = "10.0"
+      dotnet_version = "8.0"
       use_dotnet_isolated_runtime = true
     }
   }
@@ -113,10 +113,6 @@ resource "azurerm_linux_function_app" "func" {
     FUNCTIONS_WORKER_RUNTIME              = "dotnet-isolated"
     AzureWebJobsStorage__accountName      = azurerm_storage_account.sa.name
     AzureWebJobsStorage__credential       = "managedidentity"
-    
-    # Required for Linux Consumption plan (Managed Identity not supported for Azure Files)
-    WEBSITE_CONTENTAZUREFILECONNECTIONSTRING = azurerm_storage_account.sa.primary_connection_string
-    WEBSITE_CONTENTSHARE                     = "func-${var.project}-${var.environment}-content"
   }
 
   # Terraform'a dışarıdan (GitHub Action) eklenen paket URL'sini silmemesini söyler
@@ -144,10 +140,10 @@ resource "azurerm_role_assignment" "github_app_storage_blob" {
 #   - uploads container'dan blob stream okuma (BlobTrigger binding)
 #   - thumbnails container'a yazma (uygulama kodu)
 #   - azure-webjobs-hosts container'ı: blob receipt takibi (tekrar işlemeyi önler)
-resource "azurerm_role_assignment" "blob_data_owner" {
+resource "azurerm_role_assignment" "blob_data_contributor" {
   principal_id         = azurerm_linux_function_app.func.identity[0].principal_id
   scope                = azurerm_storage_account.sa.id
-  role_definition_name = "Storage Blob Data Owner"
+  role_definition_name = "Storage Blob Data Contributor"
 }
 
 # Queue Data Contributor:
