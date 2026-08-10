@@ -16,8 +16,6 @@ env:
 
 jobs:
   # --- Infrastructure ---------------------------------------------------------
-  # terraform apply: altyapı değişikliklerini Azure'a uygular.
-  # Çıktılar (function_app_name, resource_group_name) sonraki job tarafından kullanılır.
   infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
@@ -63,17 +61,9 @@ jobs:
           echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
 
   # --- Application Deploy -----------------------------------------------------
-  # Azure CLI ile Kudu ZipDeploy kullanılır.
-  #
-  # Neden functions-action değil?
-  #   functions-action, Linux Consumption + Managed Identity kombinasyonunda
-  #   WEBSITE_RUN_FROM_PACKAGE modunu kullanır. Bu modda Function App'in kendi
-  #   Managed Identity'si ile blob'u okuması gerekir. İlk deploy'da RBAC
-  #   propagation ve runtime initialization gecikmesi nedeniyle sync trigger
-  #   güvenilir şekilde çalışmaz.
-  #
-  #   Azure CLI (az functionapp deployment source config-zip) Kudu ZipDeploy
-  #   API'sini doğrudan kullanır ve Contributor rolü ile çalışır.
+  # func azure functionapp publish: Azure Functions Core Tools'un deploy komutu.
+  # Linux Consumption dahil tüm plan tiplerinde çalışır.
+  # az login ile kurulan credential'ı otomatik kullanır.
   deploy:
     name: Deploy Function App
     runs-on: ubuntu-latest
@@ -95,22 +85,22 @@ jobs:
         with:
           dotnet-version: "10.x"
 
+      # Azure Functions Core Tools v4 — func azure functionapp publish için gerekli
+      - name: Install Azure Functions Core Tools
+        run: npm install -g azure-functions-core-tools@4 --unsafe-perm true
+
       - name: Publish
         run: |
           dotnet publish src/ImageResizeFunction/ImageResizeFunction.csproj \
             --configuration Release \
             --output ${{ github.workspace }}/publish
 
-      - name: Create Deployment Package
-        run: |
-          cd ${{ github.workspace }}/publish
-          zip -r ${{ github.workspace }}/deploy.zip .
-
-      # Kudu ZipDeploy API üzerinden deploy.
-      # Contributor rolü yeterli — ek data plane rolü gerekmez.
+      # func azure functionapp publish: Core Tools Linux Consumption'da
+      # doğru deployment yöntemini (remote package) otomatik seçer.
+      # --no-build: zaten dotnet publish ile derlendi, tekrar build etme.
       - name: Deploy to Azure Functions
         run: |
-          az functionapp deployment source config-zip \
-            --resource-group ${{ needs.infra.outputs.resource_group_name }} \
-            --name ${{ needs.infra.outputs.function_app_name }} \
-            --src ${{ github.workspace }}/deploy.zip
+          cd ${{ github.workspace }}/publish
+          func azure functionapp publish ${{ needs.infra.outputs.function_app_name }} \
+            --dotnet-isolated \
+            --no-build
