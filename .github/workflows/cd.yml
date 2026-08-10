@@ -96,10 +96,12 @@ jobs:
           cd ${{ github.workspace }}/publish
           zip -r ${{ github.workspace }}/deploy.zip .
 
-      - name: Deploy via ZipDeploy
+      - name: Deploy via OneDeploy
         run: |
-          az functionapp deployment source config-zip \
+          az functionapp deploy \
             --resource-group ${{ needs.infra.outputs.resource_group_name }} \
             --name ${{ needs.infra.outputs.function_app_name }} \
-            --src ${{ github.workspace }}/deploy.zip
+            --src-path ${{ github.workspace }}/deploy.zip \
+            --type zip
+
 
