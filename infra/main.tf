@@ -140,10 +140,10 @@ resource "azurerm_role_assignment" "github_app_storage_blob" {
 #   - uploads container'dan blob stream okuma (BlobTrigger binding)
 #   - thumbnails container'a yazma (uygulama kodu)
 #   - azure-webjobs-hosts container'ı: blob receipt takibi (tekrar işlemeyi önler)
-resource "azurerm_role_assignment" "blob_data_contributor" {
+resource "azurerm_role_assignment" "blob_data_owner" {
   principal_id         = azurerm_linux_function_app.func.identity[0].principal_id
   scope                = azurerm_storage_account.sa.id
-  role_definition_name = "Storage Blob Data Contributor"
+  role_definition_name = "Storage Blob Data Owner"
 }
 
 # Queue Data Contributor:
