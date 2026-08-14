@@ -1,5 +1,8 @@
 name: CD
 
+# Deployment sırası zorunludur: altyapı → uygulama kodu → Event Grid.
+# Event subscription'ın hedefi olan fonksiyon, kod deploy edilmeden var olmaz.
+
 on:
   push:
     branches: [main]
@@ -9,152 +12,83 @@ permissions:
   contents: read
 
 env:
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_USE_OIDC: "true"
+  LOCATION: westeurope
 
 jobs:
-  # --- Infrastructure ---------------------------------------------------------
   infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     outputs:
-      function_app_name: ${{ steps.tf-output.outputs.function_app_name }}
-      resource_group_name: ${{ steps.tf-output.outputs.resource_group_name }}
-    defaults:
-      run:
-        working-directory: infra
-
+      resourceGroup: ${{ steps.deploy.outputs.resourceGroup }}
+      functionApp: ${{ steps.deploy.outputs.functionApp }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Azure Login (OIDC)
+      - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "~1.9"
-          terraform_wrapper: false
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
+      - name: Deploy Bicep
+        id: deploy
         run: |
-          terraform apply \
-            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="github_app_client_id=${{ secrets.AZURE_CLIENT_ID }}" \
-            -auto-approve \
-            -no-color
+          outputs=$(az deployment sub create \
+            --name image-resizer \
+            --location "$LOCATION" \
+            --template-file infra/main.bicep \
+            --query properties.outputs -o json)
 
-      - name: Get Terraform Outputs
-        id: tf-output
-        run: |
-          echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
-          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "resourceGroup=$(jq -r .resourceGroupName.value <<< "$outputs")" >> "$GITHUB_OUTPUT"
+          echo "functionApp=$(jq -r .functionAppName.value  <<< "$outputs")" >> "$GITHUB_OUTPUT"
 
-  # --- Application Deploy -----------------------------------------------------
-  # Linux Consumption + RBAC ortamlarında Azure/functions-action paket yükleme ve sync trigger
-  # adımlarında bilinen yetki/zamanlama sorunları çıkardığı için Azure CLI ZipDeploy (az functionapp deployment source config-zip)
-  # yöntemi kullanılmaktadır.
   deploy:
-    name: Deploy Function App
+    name: Deploy Application
     runs-on: ubuntu-latest
     needs: infra
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Azure Login (OIDC)
+      - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.x"
 
-      - name: Publish
+      - name: Publish and package
         run: |
           dotnet publish src/ImageResizeFunction/ImageResizeFunction.csproj \
-            --configuration Release \
-            --output ${{ github.workspace }}/publish
+            --configuration Release --output ./publish
+          cd publish && zip -rq ../app.zip .
 
-      - name: Package Artifacts
+      # az CLI, Flex planını algılayıp One Deploy (/api/publish) kullanır.
+      # Yeni oluşturulmuş bir app'te ilk çağrı, deployment backend'i hazır olmadığı
+      # için 502 dönebilir; SCM sitesi bu sırada 200 verdiğinden onu pollamak işe
+      # yaramaz. Tek güvenilir hazırlık sinyali işlemin kendisinin başarılı olmasıdır.
+      - name: Deploy to Function App
         run: |
-          cd ${{ github.workspace }}/publish
-          zip -r ${{ github.workspace }}/deploy.zip .
-
-      - name: Wait for SCM Site to be Ready (Smart Polling)
-        run: |
-          SCM_URL="https://${{ needs.infra.outputs.function_app_name }}.scm.azurewebsites.net/api/deployments"
-          echo "Polling SCM site endpoint ($SCM_URL)..."
-          
-          MAX_POLL=20
-          POLL_COUNT=0
-          SCM_UP=false
-
-          until [ "$SCM_UP" = "true" ] || [ $POLL_COUNT -eq $MAX_POLL ]; do
-            POLL_COUNT=$((POLL_COUNT+1))
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 10 \
-              -H "Authorization: Bearer $(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)" \
-              "$SCM_URL" || echo "000")
-            
-            echo "Attempt $POLL_COUNT/$MAX_POLL: SCM HTTP Status = $STATUS"
-            
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-              echo "SCM site is up and responsive (HTTP $STATUS)!"
-              SCM_UP=true
-            else
-              echo "SCM site not ready yet (HTTP $STATUS). Waiting 15 seconds..."
-              sleep 15
-            fi
-          done
-
-          if [ "$SCM_UP" != "true" ]; then
-            echo "SCM site failed to respond after $MAX_POLL attempts."
-            exit 1
-          fi
-
-      - name: Deploy via OneDeploy
-        run: |
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          SUCCESS=false
-
-          until [ "$SUCCESS" = "true" ] || [ $RETRY_COUNT -eq $MAX_RETRIES ]; do
-            echo "Attempting deployment (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)..."
+          for attempt in 1 2 3 4 5; do
             if az functionapp deploy \
-                --resource-group ${{ needs.infra.outputs.resource_group_name }} \
-                --name ${{ needs.infra.outputs.function_app_name }} \
-                --src-path ${{ github.workspace }}/deploy.zip \
-                --type zip; then
-              SUCCESS=true
-              echo "Deployment succeeded!"
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Deployment failed. Waiting 20 seconds before retrying..."
-                sleep 20
-              else
-                echo "Deployment failed after $MAX_RETRIES attempts."
-                exit 1
-              fi
+                 --resource-group "${{ needs.infra.outputs.resourceGroup }}" \
+                 --name "${{ needs.infra.outputs.functionApp }}" \
+                 --src-path app.zip --type zip; then
+              exit 0
             fi
+            echo "Attempt $attempt failed; deployment backend may still be initializing."
+            [ "$attempt" -lt 5 ] && sleep 30
           done
+          echo "::error::Deployment failed after 5 attempts."
+          exit 1
 
-
-
-
+      - name: Connect Event Grid
+        run: |
+          az deployment group create \
+            --resource-group "${{ needs.infra.outputs.resourceGroup }}" \
+            --name eventgrid \
+            --template-file infra/eventgrid.bicep
