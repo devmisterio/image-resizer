@@ -6,15 +6,9 @@
 .DS_Store
 **/.DS_Store
 
-# Terraform — infra
-infra/terraform.tfvars
-infra/.terraform/
-infra/*.tfstate
-infra/*.tfstate.backup
+# Elle deployment çıktıları (bkz. README)
+/publish/
+/app.zip
 
-# Terraform — bootstrap
-# terraform.tfvars dosyaları subscription_id ve github_username içerir
-bootstrap/terraform.tfvars
-bootstrap/.terraform/
-bootstrap/*.tfstate
-bootstrap/*.tfstate.backup
+# 'az bicep build' --stdout olmadan çalıştırılırsa üretilen ARM JSON
+infra/*.json

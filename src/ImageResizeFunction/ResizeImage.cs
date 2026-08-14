@@ -10,7 +10,10 @@ public sealed class ResizeImage(ILogger<ResizeImage> logger, BlobServiceClient b
 {
     [Function(nameof(ResizeImage))]
     public async Task Run(
-        [BlobTrigger("uploads/{name}", Connection = "AzureWebJobsStorage")] Stream incomingBlob,
+        // Flex Consumption yalnızca Event Grid kaynaklı blob trigger destekler.
+        // Storage → fonksiyon bağlantısı infra/eventgrid.bicep içinde kurulur.
+        [BlobTrigger("uploads/{name}", Source = BlobTriggerSource.EventGrid, Connection = "AzureWebJobsStorage")]
+        Stream incomingBlob,
         string name,
         FunctionContext context)
     {

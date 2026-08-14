@@ -4,83 +4,48 @@ on:
   pull_request:
     branches: [main]
 
-# OIDC token üretmek için id-token: write gerekli
-# contents: read ise kaynak kodu çekmek için
 permissions:
   id-token: write
   contents: read
 
-# Terraform AzureRM provider'ının OIDC ile kimlik doğrulaması için gereken env değişkenleri.
-# ARM_ prefix'li değişkenler Terraform'a özgüdür; azure/login action'ı ise
-# Azure CLI ve Azure Actions için ayrıca kimlik bağlamı oluşturur.
 env:
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_USE_OIDC: "true"
+  LOCATION: westeurope
 
 jobs:
-  # --- Terraform Plan ---------------------------------------------------------
-  # Altyapı değişikliğini simüle eder (read-only, Azure'a dokunmaz)
-  # "Bu PR merge edilirse canlı ortamda ne değişecek?" sorusuna cevap verir
-  terraform:
-    name: Terraform Plan
+  infra:
+    name: Validate Infrastructure
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Terraform provider'ın OIDC ile remote backend'e erişmesi için gerekli.
-      # PR bağlamı için bootstrap'ta "github-actions-pull-request" credential'ı tanımlandı.
-      - name: Azure Login (OIDC)
+      - name: Bicep build
+        run: |
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep build --file infra/eventgrid.bicep --stdout > /dev/null
+
+      - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "~1.9"
-
-      - name: Terraform Init
-        run: terraform init
-
-      # HCL format tutarlılığı — canonical formattan sapma varsa workflow'u durdurur
-      - name: Terraform Format Check
-        run: terraform fmt -check
-
-      # Syntax ve internal consistency doğrulaması (Azure'a bağlanmadan çalışır)
-      - name: Terraform Validate
-        run: terraform validate
-
-      # Canlı Azure ortamıyla karşılaştırarak değişiklik planı üretir.
-      # subscription_id tfvars'tan gelmiyor (gitignore'da); -var ile geçiliyor.
-      # github_app_client_id: SP lookup data source için gerekli (deployment rol ataması).
-      - name: Terraform Plan
+      # eventgrid.bicep buraya dahil değil: hedefi olan fonksiyon ancak uygulama
+      # kodu deploy edildikten sonra var olur.
+      - name: Bicep what-if
         run: |
-          terraform plan \
-            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="github_app_client_id=${{ secrets.AZURE_CLIENT_ID }}" \
-            -no-color
+          az deployment sub what-if \
+            --name image-resizer \
+            --location "$LOCATION" \
+            --template-file infra/main.bicep
 
-  # --- .NET Build -------------------------------------------------------------
-  # Uygulama kodunun derlendiğini doğrular (bozuk kod main'e giremez)
   build:
     name: Build Function App
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.x"
 
@@ -90,5 +55,4 @@ jobs:
       - name: Build
         run: |
           dotnet build src/ImageResizeFunction/ImageResizeFunction.csproj \
-            --no-restore \
-            --configuration Release
+            --no-restore --configuration Release
