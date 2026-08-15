@@ -67,8 +67,9 @@ jobs:
             --configuration Release --output ./publish
           cd publish && zip -rq ../app.zip .
 
-      # 'az functionapp deploy' KULLANILMAZ: preview durumundadır ve zip gövdesini
-      # Content-Type: application/json ile gönderdiği için Kudu 415 döndürür.
+      # 'az functionapp deploy' KULLANILMAZ: --src-path yolunda gövdeyi
+      # Content-Type: application/octet-stream ile gönderir ve Flex'in One Deploy
+      # endpoint'i bunu 415 ile reddeder (aynı endpoint application/zip ile 202 döner).
       # config-zip, Flex planını algılayıp One Deploy kullanır; ayrıca sync
       # trigger'ları bekler ve app health kontrolü yapar.
       - name: Deploy to Function App

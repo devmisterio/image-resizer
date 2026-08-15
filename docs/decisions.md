@@ -54,11 +54,17 @@ erişimi Managed Identity ile yapılır.
 
 ## Deployment komutu: `config-zip`
 
-`az functionapp deploy` (preview) zip gövdesini `Content-Type: application/json` ile
-gönderir; Kudu'nun One Deploy endpoint'i bunu 415 ile reddeder:
+`az functionapp deploy --src-path`, zip gövdesini `Content-Type: application/octet-stream`
+ile gönderir (azure-cli 2.88.0, `appservice/custom.py:11363-11364`). Flex Consumption'ın
+One Deploy endpoint'i bu içerik tipini kabul etmez.
+
+Aynı endpoint'e, aynı token ve aynı paketle yalnızca Content-Type değiştirilerek yapılan
+istek bunu izole eder:
 
 ```
-POST /api/publish?type=zip → 415 Unsupported Media Type
+POST /api/publish?type=zip
+  Content-Type: application/octet-stream  → 415 Unsupported Media Type
+  Content-Type: application/zip           → 202 Accepted
 ```
 
 `az functionapp deployment source config-zip` Flex planını algılayıp aynı One Deploy
