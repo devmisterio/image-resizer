@@ -24,6 +24,17 @@ SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 TENANT_ID=$(az account show --query tenantId -o tsv)
 ```
 
+## Resource provider kaydı
+
+Application Insights oluşturulduğunda Azure otomatik olarak bir "Failure Anomalies"
+smart detection kuralı yaratmaya çalışır. `Microsoft.AlertsManagement` kayıtlı değilse
+bu, resource group geçmişinde başarısız bir deployment bırakır — uygulamayı etkilemez
+ancak gürültü yaratır.
+
+```bash
+az provider register --namespace Microsoft.AlertsManagement --wait
+```
+
 ## Kurulum
 
 ```bash
