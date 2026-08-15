@@ -52,6 +52,22 @@ olay JSON'unu parse edip blob'u elle indirmeyi gerektirirdi — binding'in zaten
 problemi uygulama koduna taşımak olurdu. `code` bir storage anahtarı değildir; storage
 erişimi Managed Identity ile yapılır.
 
+## Deployment komutu: `config-zip`
+
+`az functionapp deploy` (preview) zip gövdesini `Content-Type: application/json` ile
+gönderir; Kudu'nun One Deploy endpoint'i bunu 415 ile reddeder:
+
+```
+POST /api/publish?type=zip → 415 Unsupported Media Type
+```
+
+`az functionapp deployment source config-zip` Flex planını algılayıp aynı One Deploy
+yolunu kullanır, ayrıca sync trigger'ları bekler ve app health kontrolü yapar.
+
+CD'de retry döngüsü yoktur. Önceki sürümde bulunan 5 denemelik döngü bu deterministik
+hatayı yakalamak yerine 2.5 dakika boyunca tekrarlayıp yanıltıcı bir "backend
+initializing" mesajı üretmişti. Retry yalnızca kanıtlanmış geçici hatalar için eklenir.
+
 ## Deployment sırası
 
 1. `main.bicep` → Function App
