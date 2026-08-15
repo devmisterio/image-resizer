@@ -67,24 +67,16 @@ jobs:
             --configuration Release --output ./publish
           cd publish && zip -rq ../app.zip .
 
-      # az CLI, Flex planını algılayıp One Deploy (/api/publish) kullanır.
-      # Yeni oluşturulmuş bir app'te ilk çağrı, deployment backend'i hazır olmadığı
-      # için 502 dönebilir; SCM sitesi bu sırada 200 verdiğinden onu pollamak işe
-      # yaramaz. Tek güvenilir hazırlık sinyali işlemin kendisinin başarılı olmasıdır.
+      # 'az functionapp deploy' KULLANILMAZ: preview durumundadır ve zip gövdesini
+      # Content-Type: application/json ile gönderdiği için Kudu 415 döndürür.
+      # config-zip, Flex planını algılayıp One Deploy kullanır; ayrıca sync
+      # trigger'ları bekler ve app health kontrolü yapar.
       - name: Deploy to Function App
         run: |
-          for attempt in 1 2 3 4 5; do
-            if az functionapp deploy \
-                 --resource-group "${{ needs.infra.outputs.resourceGroup }}" \
-                 --name "${{ needs.infra.outputs.functionApp }}" \
-                 --src-path app.zip --type zip; then
-              exit 0
-            fi
-            echo "Attempt $attempt failed; deployment backend may still be initializing."
-            [ "$attempt" -lt 5 ] && sleep 30
-          done
-          echo "::error::Deployment failed after 5 attempts."
-          exit 1
+          az functionapp deployment source config-zip \
+            --resource-group "${{ needs.infra.outputs.resourceGroup }}" \
+            --name "${{ needs.infra.outputs.functionApp }}" \
+            --src app.zip
 
       - name: Connect Event Grid
         run: |
