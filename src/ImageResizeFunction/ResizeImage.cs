@@ -14,8 +14,7 @@ public sealed class ResizeImage(ILogger<ResizeImage> logger, BlobServiceClient b
         // Storage → fonksiyon bağlantısı infra/eventgrid.bicep içinde kurulur.
         [BlobTrigger("uploads/{name}", Source = BlobTriggerSource.EventGrid, Connection = "AzureWebJobsStorage")]
         Stream incomingBlob,
-        string name,
-        FunctionContext context)
+        string name)
     {
         logger.LogInformation("Görsel işleniyor: {ImageName}", name);
 
